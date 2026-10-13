@@ -51,12 +51,15 @@ export function ProjectTimeline({
   projectStart,
   onExpand,
   tall = false,
+  labelWidth = 78,
 }: {
   title: string;
   rows: TimelineRow[];
   projectStart: string;
   onExpand?: () => void;
   tall?: boolean;
+  /** Width of the row-label column in px (wider for project names on the Portfolio roadmap). */
+  labelWidth?: number;
 }) {
   const initial = new Date(parseDate(projectStart).getFullYear(), 0, 1);
   const [start, setStart] = useState(initial);
@@ -115,7 +118,7 @@ export function ProjectTimeline({
         <div className="min-w-[340px]">
           {/* Column headings */}
           <div className="flex">
-            <div className="w-[78px] shrink-0 pb-2 text-[9.5px] leading-3 font-medium text-ink-body">{zoom === "months" ? yearLabel(start, end) : ""}</div>
+            <div style={{ width: labelWidth }} className="shrink-0 pb-2 text-[9.5px] leading-3 font-medium text-ink-body">{zoom === "months" ? yearLabel(start, end) : ""}</div>
             <div className="grid flex-1" style={{ gridTemplateColumns: `repeat(${cols.count}, minmax(0, 1fr))` }}>
               {columns.map((c) => (
                 <span key={c.toISOString()} className="px-0.5 pb-2 text-center text-[9.5px] leading-3 whitespace-nowrap text-ink-muted" title={formatMonth(c)}>
@@ -126,7 +129,7 @@ export function ProjectTimeline({
           </div>
 
           <div className="flex">
-            <ul className="w-[78px] shrink-0" aria-hidden>
+            <ul style={{ width: labelWidth }} className="shrink-0" aria-hidden>
               {rows.map((r) => (
                 <li key={r.id} className="flex items-center truncate pr-2 text-[11px] leading-4 text-ink-body" style={{ height: rowH }}>
                   {r.label}

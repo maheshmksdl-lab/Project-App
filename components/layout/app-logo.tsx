@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -14,12 +15,8 @@ export function LogoMark({ className }: { className?: string }) {
 /** App logo in the sidebar and navigation drawer — links to Home. */
 export function AppLogo({ className }: { className?: string }) {
   return (
-    <Link href="/home" className={cn("inline-flex shrink-0 items-center gap-2.5 rounded-md", className)} aria-label="EVOQ Projects — go to Home">
-      <LogoMark />
-      <span className="flex flex-col">
-        <span className="font-serif text-[21px] leading-[22px] font-bold tracking-[0.01em] text-ink">EVOQ</span>
-        <span className="text-[12px] leading-4 text-ink-muted">Projects</span>
-      </span>
+    <Link href="/home" className={cn("inline-flex shrink-0 items-center rounded-md", className)} aria-label="EVOQ Projects — go to Home">
+      <Image src="/media/ai-app-projects.png" alt="Projects" width={184} height={55} priority className="h-10 w-auto" />
     </Link>
   );
 }

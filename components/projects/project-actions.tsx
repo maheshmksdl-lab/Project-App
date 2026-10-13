@@ -1,9 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { ArchiveIcon, ArrowRightIcon, DotsThreeVerticalIcon, LinkSimpleIcon, StarIcon } from "@phosphor-icons/react/dist/ssr";
+import {
+  ArchiveIcon,
+  ArrowRightIcon,
+  BookmarkSimpleIcon,
+  CopyIcon,
+  DotsThreeVerticalIcon,
+  FolderSimpleIcon,
+  GearSixIcon,
+  LinkSimpleIcon,
+  StarIcon,
+} from "@phosphor-icons/react/dist/ssr";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useAppDialogs } from "@/components/shared/app-dialogs";
+import { useBookmark } from "@/components/shared/bookmark-button";
 import { IconButton } from "@/components/shared/project-ui";
 import { useArchiveProject, useSetFavorite } from "@/hooks/use-projects";
 import { projectHref } from "@/lib/routes";
@@ -18,6 +30,8 @@ export function copyProjectLink(id: string) {
 export function ProjectRowMenu({ project }: { project: ProjectSummary }) {
   const setFavorite = useSetFavorite();
   const archive = useArchiveProject();
+  const dialogs = useAppDialogs();
+  const bookmark = useBookmark("project", project.id, project.name);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -34,10 +48,22 @@ export function ProjectRowMenu({ project }: { project: ProjectSummary }) {
         <DropdownMenuItem onSelect={() => setFavorite.mutate({ id: project.id, favorite: !project.favorite })}>
           <StarIcon aria-hidden /> {project.favorite ? "Remove from favorites" : "Add to favorites"}
         </DropdownMenuItem>
+        <DropdownMenuItem onSelect={bookmark.toggle}>
+          <BookmarkSimpleIcon aria-hidden /> {bookmark.saved ? "Remove bookmark" : "Bookmark"}
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => copyProjectLink(project.id)}>
           <LinkSimpleIcon aria-hidden /> Copy link
         </DropdownMenuItem>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => dialogs.openProjectSettings(project.id)}>
+          <GearSixIcon aria-hidden /> Settings
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => dialogs.openDuplicateProject(project)}>
+          <CopyIcon aria-hidden /> Duplicate
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => dialogs.openMoveToFolder(project)}>
+          <FolderSimpleIcon aria-hidden /> Move to folder
+        </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => archive.mutate(project.id, { onSuccess: () => toast.success(`${project.name} archived`) })}
         >

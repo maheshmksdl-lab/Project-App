@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { Icon } from "@phosphor-icons/react";
@@ -29,11 +30,15 @@ import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AvatarStack, PersonAvatar } from "@/components/shared/person-avatar";
-import { Card, comingSoon, PageShell, ProgressBar, SectionHeader, ViewAll } from "@/components/shared/project-ui";
+import { Card, PageShell, ProgressBar, SectionHeader, ViewAll } from "@/components/shared/project-ui";
 import { ErrorState } from "@/components/shared/state-panels";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useHome, useSetFavorite } from "@/hooks/use-projects";
 import { useHydrated } from "@/hooks/use-hydrated";
-import { formatAgo } from "@/lib/format";
+import { useStoredState } from "@/hooks/use-stored-state";
+import { useBookmarkKeys, useFiles, useNotes, useReportData, useTasks, useTemplates } from "@/hooks/use-workspace";
+import { formatAgo, pluralize, toIsoDate } from "@/lib/format";
 import { CURRENT_USER_ID, personById } from "@/lib/mock-data/people";
 import { ACCENT, STATUS_DOT, STATUS_META } from "@/lib/project-meta";
 import { projectHref } from "@/lib/routes";
@@ -117,16 +122,11 @@ function BriefEntry({ item }: { item: BriefItem }) {
             </>
           )}
         </span>
-        {item.action &&
-          (item.action.href ? (
-            <Link href={item.action.href} className={linkCls} style={{ color: s.link }}>
-              {linkBody}
-            </Link>
-          ) : (
-            <button type="button" onClick={() => comingSoon(item.action!.label.replace(/^View /, ""))} className={linkCls} style={{ color: s.link }}>
-              {linkBody}
-            </button>
-          ))}
+        {item.action?.href && (
+          <Link href={item.action.href} className={linkCls} style={{ color: s.link }}>
+            {linkBody}
+          </Link>
+        )}
       </span>
     </li>
   );
@@ -140,7 +140,7 @@ function TodaysBrief({ brief }: { brief: BriefItem[] }) {
         <h2 className="text-[17px] leading-6 font-semibold whitespace-nowrap text-ink">Today&apos;s Brief</h2>
         <span className="rounded-md whitespace-nowrap bg-brand-tint px-2 py-0.5 text-[11px] leading-4 font-medium text-brand">{brief.length} updates</span>
         <div className="ml-auto">
-          <ViewAll />
+          <ViewAll href="/my-day" />
         </div>
       </header>
       <ul className="grid divide-y divide-line-soft px-5 pt-2 pb-2 sm:grid-cols-2 sm:gap-x-6 sm:divide-y-0 sm:px-6 lg:grid-cols-3 xl:grid-cols-5 xl:gap-x-0 xl:divide-x xl:pt-4 xl:pb-5">
@@ -272,7 +272,7 @@ function TodaysFocus({ focus }: { focus: FocusSummary }) {
   const pct = Math.round((focus.done / focus.total) * 100);
   return (
     <section aria-label="Today's focus" className="min-w-0">
-      <SectionHeader title="Today's Focus" action={<ViewAll label="View calendar" />} />
+      <SectionHeader title="Today's Focus" action={<ViewAll href="/calendar" label="View calendar" />} />
       <Card className="rounded-xl">
         <ul className="grid grid-cols-2 divide-line-soft sm:grid-cols-5 sm:divide-x">
           <li className="col-span-2 flex flex-col items-center px-2 py-4 text-center sm:col-span-1">
@@ -294,41 +294,113 @@ function TodaysFocus({ focus }: { focus: FocusSummary }) {
 
 // ── My workspace ─────────────────────────────────────────────────────
 
-const WORKSPACE_STYLE: Record<WorkspaceKey, { icon: Icon; fg: string }> = {
-  my_day: { icon: CheckSquareIcon, fg: "#6A4FF6" },
-  approvals: { icon: FileTextIcon, fg: "#F97316" },
-  calendar: { icon: CalendarBlankIcon, fg: "#3B82F6" },
-  notes: { icon: NoteIcon, fg: "#F59E0B" },
-  files: { icon: FolderSimpleIcon, fg: "#3B82F6" },
-  bookmarks: { icon: BookmarkSimpleIcon, fg: "#6A4FF6" },
-  templates: { icon: StackIcon, fg: "#6A4FF6" },
+const WORKSPACE_STYLE: Record<WorkspaceKey, { icon: Icon; fg: string; href: string }> = {
+  my_day: { icon: CheckSquareIcon, fg: "#6A4FF6", href: "/my-day" },
+  approvals: { icon: FileTextIcon, fg: "#F97316", href: "/workflows?tab=approvals&mine=1" },
+  calendar: { icon: CalendarBlankIcon, fg: "#3B82F6", href: "/calendar" },
+  notes: { icon: NoteIcon, fg: "#F59E0B", href: "/notes" },
+  files: { icon: FolderSimpleIcon, fg: "#3B82F6", href: "/files" },
+  bookmarks: { icon: BookmarkSimpleIcon, fg: "#6A4FF6", href: "/bookmarks" },
+  templates: { icon: StackIcon, fg: "#6A4FF6", href: "/templates" },
 };
 
+const tileClass =
+  "flex h-[60px] w-full items-center gap-3 rounded-lg border border-line bg-card px-3.5 text-left shadow-card transition-colors hover:border-brand-soft hover:bg-brand-surface focus-visible:outline-2 focus-visible:outline-brand-action";
+
+const ALL_TILES: WorkspaceKey[] = ["my_day", "approvals", "calendar", "notes", "files", "bookmarks", "templates"];
+
+/** Live counts for the tiles, from the same data as the pages they open. */
+function useTileMeta(): Partial<Record<WorkspaceKey, string>> {
+  const hydrated = useHydrated();
+  const { data: tasks } = useTasks();
+  const { data: report } = useReportData();
+  const { data: notes } = useNotes();
+  const { data: files } = useFiles();
+  const { data: bookmarks } = useBookmarkKeys();
+  const { data: templates } = useTemplates();
+  if (!hydrated) return {};
+  const today = toIsoDate(new Date());
+  const open = (tasks ?? []).filter((t) => t.task.assigneeId === CURRENT_USER_ID && t.task.status !== "done" && t.task.dueDate <= today).length;
+  return {
+    my_day: tasks ? pluralize(open, "task") + " due" : undefined,
+    approvals: report ? `${report.approvals.filter((a) => a.status === "pending" && a.approverId === CURRENT_USER_ID).length} pending` : undefined,
+    notes: notes ? pluralize(notes.length, "note") : undefined,
+    files: files ? pluralize(files.length, "file") : undefined,
+    bookmarks: bookmarks ? pluralize(bookmarks.length, "item") : undefined,
+    templates: templates ? pluralize(templates.length, "template") : undefined,
+  };
+}
+
+/** "Customize": choose which tiles show (kept in this browser). */
+function CustomizeDialog({ visible, onChange, onClose }: { visible: WorkspaceKey[]; onChange: (v: WorkspaceKey[]) => void; onClose: () => void }) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm gap-3 rounded-2xl">
+        <DialogTitle className="pr-8 text-[17px] font-semibold text-ink">Customize My Workspace</DialogTitle>
+        <DialogDescription className="text-[13px] text-ink-muted">Choose the shortcuts shown on Home. Saved in this browser.</DialogDescription>
+        <ul className="space-y-1">
+          {ALL_TILES.map((k) => {
+            const s = WORKSPACE_STYLE[k];
+            const IconCmp = s.icon;
+            const on = visible.includes(k);
+            return (
+              <li key={k}>
+                <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-brand-surface">
+                  <Checkbox
+                    checked={on}
+                    disabled={on && visible.length === 1}
+                    onCheckedChange={(v) => onChange(v === true ? ALL_TILES.filter((x) => x === k || visible.includes(x)) : visible.filter((x) => x !== k))}
+                    className="data-[state=checked]:border-brand data-[state=checked]:bg-brand"
+                  />
+                  <IconCmp size={18} aria-hidden style={{ color: s.fg }} />
+                  <span className="text-[13px] text-ink">{TILE_LABEL[k]}</span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="flex justify-between gap-2">
+          <button type="button" onClick={() => onChange(ALL_TILES)} className="rounded text-[13px] font-medium text-brand hover:text-brand-press">
+            Show all
+          </button>
+          <button type="button" onClick={onClose} className="inline-flex h-9 items-center rounded-lg bg-brand px-4 text-button text-white hover:bg-brand-press">
+            Done
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const TILE_LABEL: Record<WorkspaceKey, string> = { my_day: "My Day", approvals: "Approvals", calendar: "Calendar", notes: "Notes", files: "Files", bookmarks: "Bookmarks", templates: "Templates" };
+
 function MyWorkspace({ tiles }: { tiles: WorkspaceTile[] }) {
+  const [visible, setVisible] = useStoredState<WorkspaceKey[]>("evoq-projects:home-tiles", ALL_TILES);
+  const [customizing, setCustomizing] = useState(false);
+  const meta = useTileMeta();
   return (
     <section aria-label="My workspace" className="min-w-0">
-      <SectionHeader title="My Workspace" action={<ViewAll label="Customize" />} />
+      <SectionHeader title="My Workspace" action={<ViewAll label="Customize" onClick={() => setCustomizing(true)} />} />
       <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        {tiles.map((t) => {
-          const s = WORKSPACE_STYLE[t.key];
-          const IconCmp = s.icon;
-          return (
-            <li key={t.key}>
-              <button
-                type="button"
-                onClick={() => comingSoon(t.label)}
-                className="flex h-[60px] w-full items-center gap-3 rounded-lg border border-line bg-card px-3.5 text-left shadow-card transition-colors hover:border-brand-soft hover:bg-brand-surface focus-visible:outline-2 focus-visible:outline-brand-action"
-              >
-                <IconCmp size={24} aria-hidden className="shrink-0" style={{ color: s.fg }} />
-                <span className="min-w-0">
-                  <span className="block truncate text-[13px] leading-5 font-medium text-ink">{t.label}</span>
-                  <span className="block truncate text-[12px] leading-4 text-ink-muted">{t.meta}</span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
+        {tiles
+          .filter((t) => visible.includes(t.key))
+          .map((t) => {
+            const s = WORKSPACE_STYLE[t.key];
+            const IconCmp = s.icon;
+            return (
+              <li key={t.key}>
+                <Link href={s.href} className={tileClass}>
+                  <IconCmp size={24} aria-hidden className="shrink-0" style={{ color: s.fg }} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] leading-5 font-medium text-ink">{t.label}</span>
+                    <span className="block truncate text-[12px] leading-4 text-ink-muted">{meta[t.key] ?? t.meta}</span>
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
       </ul>
+      {customizing && <CustomizeDialog visible={visible} onChange={setVisible} onClose={() => setCustomizing(false)} />}
     </section>
   );
 }
@@ -340,12 +412,13 @@ const ACTIVITY_ICON: Record<ActivityKind, { icon: Icon; fg: string }> = {
   uploaded: { icon: FileIcon, fg: "#3B82F6" },
   completed: { icon: CheckCircleIcon, fg: "#16A34A" },
   commented: { icon: ChatTextIcon, fg: "#6A4FF6" },
+  updated: { icon: ClockIcon, fg: "#667085" },
 };
 
 function RecentActivity({ items }: { items: ActivityItem[] }) {
   return (
     <section aria-label="Recent activity">
-      <SectionHeader title="Recent Activity" action={<ViewAll />} />
+      <SectionHeader title="Recent Activity" action={<ViewAll href="/activity" />} />
       <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {items.map((a) => {
           const actor = personById(a.actorId);

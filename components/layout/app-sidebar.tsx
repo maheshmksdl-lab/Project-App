@@ -1,24 +1,28 @@
 "use client";
 
-import { Suspense, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { CaretDownIcon, PlusIcon, SignOutIcon, UserCircleIcon, XIcon } from "@phosphor-icons/react/dist/ssr";
+import { toast } from "sonner";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useAppDialogs } from "@/components/shared/app-dialogs";
 import { PersonAvatar } from "@/components/shared/person-avatar";
-import { comingSoon } from "@/components/shared/project-ui";
-import { useFavorites } from "@/hooks/use-projects";
+import { OutlineButton } from "@/components/shared/project-ui";
+import { useFavorites, useProjects, useSetFavorite } from "@/hooks/use-projects";
 import { useHydrated } from "@/hooks/use-hydrated";
-import { CURRENT_USER_ID, personById } from "@/lib/mock-data/people";
+import { useMe } from "@/hooks/use-me";
+import { useTeams } from "@/hooks/use-workspace";
 import { ACCENT } from "@/lib/project-meta";
 import { projectHref } from "@/lib/routes";
+import { DEFAULT_PROJECT_QUERY } from "@/lib/schemas/project";
 import { cn } from "@/lib/utils";
 import { AppLogo } from "./app-logo";
-import { FOOTER_ITEMS, MAIN_ITEMS, TEAMS, type NavItem } from "./nav-config";
+import { FOOTER_ITEMS, MAIN_ITEMS, TEAMS, teamHref, type NavItem } from "./nav-config";
 import { useShell } from "./shell-context";
-
-const me = personById(CURRENT_USER_ID)!;
 
 const rowClass = "group flex h-10 w-full items-center gap-3 rounded-lg px-3 text-nav-item transition-colors focus-visible:outline-2 focus-visible:outline-brand-action";
 
@@ -31,13 +35,6 @@ function NavRow({ item, active, onNavigate }: { item: NavItem; active: boolean; 
       <span className="truncate">{item.label}</span>
     </>
   );
-  if (item.soon) {
-    return (
-      <button type="button" className={cls} onClick={() => comingSoon(item.label)}>
-        {body}
-      </button>
-    );
-  }
   return (
     <Link href={item.href} onClick={onNavigate} aria-current={active ? "page" : undefined} className={cls}>
       {body}
@@ -61,18 +58,52 @@ function GroupLabel({ label, onAdd }: { label: string; onAdd: () => void }) {
   );
 }
 
-/** The project open in the Projects panel (?project=…) — read in its own Suspense boundary. */
-function OpenProject({ children }: { children: (id: string | null) => ReactNode }) {
-  return children(useSearchParams().get("project"));
+/** "+" on Favorites: star or unstar any project from one list. */
+function FavoritesDialog({ onClose }: { onClose: () => void }) {
+  const { data } = useProjects(DEFAULT_PROJECT_QUERY);
+  const setFavorite = useSetFavorite();
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="flex max-h-[min(88dvh,640px)] flex-col gap-3 rounded-2xl sm:max-w-md">
+        <DialogTitle className="pr-8 text-[17px] font-semibold text-ink">Favorite projects</DialogTitle>
+        <DialogDescription className="text-[13px] text-ink-muted">Starred projects are pinned in the sidebar.</DialogDescription>
+        <ul className="-mx-2 min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+          {(data?.items ?? []).map((p) => (
+            <li key={p.id}>
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-brand-surface">
+                <Checkbox
+                  checked={p.favorite}
+                  onCheckedChange={(v) =>
+                    setFavorite.mutate(
+                      { id: p.id, favorite: v === true },
+                      { onSuccess: () => toast.success(v === true ? "Added to favorites" : "Removed from favorites", { description: p.name }) },
+                    )
+                  }
+                  className="data-[state=checked]:border-brand data-[state=checked]:bg-brand"
+                />
+                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: ACCENT[p.accent].dot }} aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{p.name}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <div className="flex justify-end">
+          <OutlineButton onClick={onClose}>Done</OutlineButton>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function Favorites({ openProject, onNavigate }: { openProject: string | null; onNavigate?: () => void }) {
   const { data } = useFavorites();
   const hydrated = useHydrated();
+  const [picking, setPicking] = useState(false);
   const items = hydrated ? (data ?? []) : [];
   return (
     <div>
-      <GroupLabel label="Favorites" onAdd={() => comingSoon("Adding favorites from here")} />
+      <GroupLabel label="Favorites" onAdd={() => setPicking(true)} />
+      {picking && <FavoritesDialog onClose={() => setPicking(false)} />}
       <ul className="space-y-0.5" aria-label="Favorite projects">
         {items.map((p) => {
           const href = projectHref(p.id);
@@ -100,31 +131,43 @@ function Favorites({ openProject, onNavigate }: { openProject: string | null; on
   );
 }
 
-function Teams() {
+function Teams({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const { data: teams } = useTeams();
+  const { openTeam } = useAppDialogs();
   return (
     <div>
-      <GroupLabel label="Teams" onAdd={() => comingSoon("Creating teams")} />
+      <GroupLabel label="Teams" onAdd={() => openTeam()} />
       <ul className="space-y-0.5" aria-label="Teams">
-        {TEAMS.map((t) => (
-          <li key={t.id}>
-            <button
-              type="button"
-              onClick={() => comingSoon(t.name)}
-              className="flex h-9 w-full items-center gap-3 rounded-lg px-2 text-[13px] leading-5 text-ink-body transition-colors hover:bg-brand-depth-10 hover:text-ink focus-visible:outline-2 focus-visible:outline-brand-action"
-            >
-              <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold" style={{ color: t.fg, backgroundColor: t.bg }} aria-hidden>
-                {t.short}
-              </span>
-              <span className="truncate">{t.name}</span>
-            </button>
-          </li>
-        ))}
+        {(teams ?? TEAMS).map((t) => {
+          const href = teamHref(t.id);
+          const active = pathname === href;
+          return (
+            <li key={t.id}>
+              <Link
+                href={href}
+                onClick={onNavigate}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex h-9 w-full items-center gap-3 rounded-lg px-2 text-[13px] leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-brand-action",
+                  active ? "bg-brand-10 font-medium text-brand" : "text-ink-body hover:bg-brand-depth-10 hover:text-ink",
+                )}
+              >
+                <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold" style={{ color: t.fg, backgroundColor: t.bg }} aria-hidden>
+                  {t.short}
+                </span>
+                <span className="truncate">{t.name}</span>
+              </Link>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
 }
 
-function UserCard() {
+function UserCard({ onNavigate }: { onNavigate?: () => void }) {
+  const me = useMe();
+  const { openLogout } = useAppDialogs();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-brand-depth-10 focus-visible:outline-2 focus-visible:outline-brand-action data-[state=open]:bg-brand-depth-10">
@@ -136,10 +179,17 @@ function UserCard() {
         <CaretDownIcon size={14} aria-hidden className="shrink-0 text-ink-muted" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-[--radix-dropdown-menu-trigger-width] min-w-52 rounded-xl">
-        <DropdownMenuItem onSelect={() => comingSoon("Your profile")}>
-          <UserCircleIcon aria-hidden /> Profile
+        <DropdownMenuItem asChild>
+          <Link href="/profile" onClick={onNavigate}>
+            <UserCircleIcon aria-hidden /> Profile
+          </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => comingSoon("Signing out")}>
+        <DropdownMenuItem
+          onSelect={() => {
+            onNavigate?.();
+            openLogout();
+          }}
+        >
           <SignOutIcon aria-hidden /> Log out
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -151,32 +201,32 @@ function UserCard() {
 function SidebarBody({ onNavigate, header }: { onNavigate?: () => void; header: ReactNode }) {
   const pathname = usePathname();
   const under = (base: string) => pathname === base || pathname.startsWith(`${base}/`);
+  // The project whose Details page is open (/projects/<id>).
+  const openProject = pathname.startsWith("/projects/") ? decodeURIComponent(pathname.slice("/projects/".length)) : null;
   return (
     <>
       {header}
       <nav aria-label="Main navigation" className="flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3 scrollbar-thin">
         <div className="space-y-0.5">
           {MAIN_ITEMS.map((item) => (
-            <NavRow key={item.href} item={item} active={!item.soon && under(item.href)} onNavigate={onNavigate} />
+            <NavRow key={item.href} item={item} active={under(item.href)} onNavigate={onNavigate} />
           ))}
         </div>
         <div className="mt-4 border-t border-line pt-4">
-          <Suspense fallback={<Favorites openProject={null} onNavigate={onNavigate} />}>
-            <OpenProject>{(id) => <Favorites openProject={pathname === "/projects" ? id : null} onNavigate={onNavigate} />}</OpenProject>
-          </Suspense>
+          <Favorites openProject={openProject} onNavigate={onNavigate} />
         </div>
         <div className="mt-4 border-t border-line pt-4">
-          <Teams />
+          <Teams pathname={pathname} onNavigate={onNavigate} />
         </div>
       </nav>
       <div className="shrink-0 px-3 pb-3">
         <div className="space-y-0.5 pb-3">
           {FOOTER_ITEMS.map((item) => (
-            <NavRow key={item.href} item={item} active={false} />
+            <NavRow key={item.href} item={item} active={under(item.href)} onNavigate={onNavigate} />
           ))}
         </div>
         <div className="border-t border-line pt-3">
-          <UserCard />
+          <UserCard onNavigate={onNavigate} />
         </div>
       </div>
     </>

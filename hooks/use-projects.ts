@@ -47,18 +47,21 @@ export function useArchiveProject() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => archiveProject(id),
+    // Archiving reaches every module (teams, reports, calendar …).
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: projectKeys.all });
-      qc.invalidateQueries({ queryKey: projectKeys.home });
+      void qc.invalidateQueries();
     },
   });
 }
 
-export function useSetTaskDone(projectId: string) {
+/** Ticks a task done or reopens it; tasks also feed My Day, the calendar, reports and the activity log. */
+export function useSetTaskDone() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ taskId, done }: { taskId: string; done: boolean }) => setTaskDone(taskId, done),
-    onSettled: () => qc.invalidateQueries({ queryKey: projectKeys.detail(projectId) }),
+    onSettled: () => {
+      void qc.invalidateQueries();
+    },
   });
 }
 
@@ -66,6 +69,8 @@ export function useUpdateAbout(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (about: string) => updateProjectAbout(projectId, about),
-    onSettled: () => qc.invalidateQueries({ queryKey: projectKeys.detail(projectId) }),
+    onSettled: () => {
+      void qc.invalidateQueries();
+    },
   });
 }

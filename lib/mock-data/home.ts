@@ -13,28 +13,28 @@ export const BRIEF: BriefItem[] = [
     kind: "approvals",
     title: "2 approvals",
     body: "need your attention.",
-    action: { label: "Review" },
+    action: { label: "Review", href: "/workflows?tab=approvals&mine=1" },
   },
   {
     id: "br-3",
     kind: "blocked",
     title: "Warehouse Expansion",
     body: "is currently blocked.",
-    action: { label: "View details", href: "/projects?project=warehouse-expansion" },
+    action: { label: "View details", href: "/projects/warehouse-expansion" },
   },
   {
     id: "br-4",
     kind: "completed",
     title: "Sarah completed",
     body: "API integration yesterday.",
-    action: { label: "View update" },
+    action: { label: "View update", href: "/projects/customer-portal?tab=activity" },
   },
   {
     id: "br-5",
     kind: "recurring",
     title: "3 recurring workflows",
     body: "begin today.",
-    action: { label: "View workflows" },
+    action: { label: "View workflows", href: "/workflows?kind=recurring" },
   },
 ];
 

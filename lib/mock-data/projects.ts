@@ -232,9 +232,9 @@ export const PROJECT_DETAILS: Record<string, Omit<ProjectDetail, keyof ProjectSu
     ],
     budget: { spent: 480_000, total: 650_000 },
     links: [
-      { id: "lnk-1", label: "Project brief", href: "#" },
-      { id: "lnk-2", label: "Requirements document", href: "#" },
-      { id: "lnk-3", label: "Design files", href: "#" },
+      { id: "lnk-1", label: "Project brief", href: "/notes?note=note-erp-brief" },
+      { id: "lnk-2", label: "Requirements document", href: "/files?file=file-req" },
+      { id: "lnk-3", label: "Design files", href: "/files?file=file-design" },
     ],
   },
 };

@@ -10,15 +10,9 @@ import type { ComponentProps, ReactNode } from "react";
 import Link from "next/link";
 import type { Icon } from "@phosphor-icons/react";
 import { ArrowRightIcon } from "@phosphor-icons/react/dist/ssr";
-import { toast } from "sonner";
 import { STATUS_META } from "@/lib/project-meta";
 import type { ProjectStatus } from "@/lib/types/project";
 import { cn } from "@/lib/utils";
-
-/** Areas that aren't built yet answer with a toast instead of a placeholder page. */
-export function comingSoon(what: string) {
-  toast(`${what} is coming soon`, { description: "This area isn't available in this release." });
-}
 
 // ── Page chrome ──────────────────────────────────────────────────────
 
@@ -58,8 +52,8 @@ export function SectionHeader({ title, action, className }: { title: string; act
 const viewAllClass =
   "inline-flex items-center gap-2 rounded text-[13px] leading-5 font-medium whitespace-nowrap text-brand transition-colors hover:text-brand-press focus-visible:outline-2 focus-visible:outline-brand-action";
 
-/** "View all →" — a link when the destination exists, otherwise a button that says it's coming. */
-export function ViewAll({ href, label = "View all", onClick }: { href?: string; label?: string; onClick?: () => void }) {
+/** "View all →" — a link to a page, or a button for an in-page action (switching tab, opening a dialog). */
+export function ViewAll({ href, label = "View all", onClick }: { label?: string } & ({ href: string; onClick?: never } | { href?: never; onClick: () => void })) {
   const body = (
     <>
       {label}
@@ -74,7 +68,7 @@ export function ViewAll({ href, label = "View all", onClick }: { href?: string; 
     );
   }
   return (
-    <button type="button" onClick={onClick ?? (() => comingSoon(label.replace(/^View /, "")))} className={viewAllClass}>
+    <button type="button" onClick={onClick} className={viewAllClass}>
       {body}
     </button>
   );
@@ -184,12 +178,15 @@ export function UnderlineTabs<T extends string>({
   onChange,
   label,
   className,
+  dot = true,
 }: {
   tabs: { value: T; label: string; count?: number }[];
   value: T;
   onChange: (v: T) => void;
   label: string;
   className?: string;
+  /** The small dot under the active tab (off on the Projects list). */
+  dot?: boolean;
 }) {
   return (
     <div role="tablist" aria-label={label} className={cn("flex gap-6 overflow-x-auto border-b border-line scrollbar-none sm:gap-7", className)}>
@@ -212,7 +209,7 @@ export function UnderlineTabs<T extends string>({
             {active && (
               <>
                 <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand" aria-hidden />
-                <span className="absolute bottom-[3px] left-1/2 size-1 -translate-x-1/2 rounded-full bg-brand" aria-hidden />
+                {dot && <span className="absolute bottom-[3px] left-1/2 size-1 -translate-x-1/2 rounded-full bg-brand" aria-hidden />}
               </>
             )}
           </button>

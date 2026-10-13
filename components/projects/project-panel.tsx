@@ -1,7 +1,9 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Icon } from "@phosphor-icons/react";
 import {
   ArchiveIcon,
@@ -17,13 +19,13 @@ import {
   FolderSimpleIcon,
   GearSixIcon,
   LinkSimpleIcon,
+  NoteIcon,
   PencilSimpleIcon,
   PlusIcon,
   StackIcon,
   StarIcon,
   TrashIcon,
   TrendUpIcon,
-  TrayIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -31,7 +33,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } f
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AvatarStack, PersonAvatar } from "@/components/shared/person-avatar";
-import { Badge, Card, CardHeader, comingSoon, IconButton, OutlineButton, PrimaryButton, ProgressBar, StatusPill, UnderlineTabs, ViewAll } from "@/components/shared/project-ui";
+import { Badge, Card, CardHeader, IconButton, OutlineButton, PrimaryButton, ProgressBar, StatusPill, UnderlineTabs, ViewAll } from "@/components/shared/project-ui";
 import { EmptyState, ErrorState } from "@/components/shared/state-panels";
 import { useArchiveProject, useProject, useSetFavorite, useSetTaskDone, useUpdateAbout } from "@/hooks/use-projects";
 import { formatCurrency, formatDate, formatDateRange } from "@/lib/format";
@@ -39,6 +41,14 @@ import { personById } from "@/lib/mock-data/people";
 import { ACCENT, PRIORITY_META, STATUS_DOT, STATUS_META, TASK_STATUS_META } from "@/lib/project-meta";
 import type { Milestone, Person, ProjectDetail, ProjectTask } from "@/lib/types/project";
 import { cn } from "@/lib/utils";
+import { ActivityFeed } from "@/components/activity/activity-feed";
+import { FilesPanel } from "@/components/files/files-panel";
+import { useAppDialogs } from "@/components/shared/app-dialogs";
+import { BookmarkButton } from "@/components/shared/bookmark-button";
+import { useCreate } from "@/components/shared/create-dialogs";
+import { ApprovalCard } from "@/components/workflows/approval-card";
+import { useFolders, useNotes, useReportData, useSaveAsTemplate } from "@/hooks/use-workspace";
+import { ProjectDiscussion } from "./project-discussion";
 import { copyProjectLink } from "./project-actions";
 import { ProjectTimeline } from "./project-timeline";
 
@@ -59,7 +69,7 @@ const people = (ids: string[]) => ids.map(personById).filter((p): p is Person =>
 
 // ── Actions ──────────────────────────────────────────────────────────
 
-/** Archive / delete both take the project off the list (the mock keeps no archive) and close the panel. */
+/** Archive / delete both take the project off the list (the mock keeps no archive) and return to it. */
 function useRemoveProject(project: ProjectDetail, onClose: () => void) {
   const archive = useArchiveProject();
   return (verb: "archived" | "deleted") =>
@@ -108,6 +118,7 @@ function DetailHeader({
 }) {
   const setFavorite = useSetFavorite();
   const remove = useRemoveProject(project, onClose);
+  const dialogs = useAppDialogs();
   return (
     <div className="relative overflow-hidden border-b border-line bg-white">
       {project.heroImage && (
@@ -131,7 +142,7 @@ function DetailHeader({
         </button>
 
         <div className="mt-3 flex items-center gap-2 sm:gap-3">
-          <h2 id="project-panel-title" className="min-w-0 text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink @lg:text-[26px] @lg:leading-9">{project.name}</h2>
+          <h1 id="project-title" className="min-w-0 text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink @lg:text-[26px] @lg:leading-9">{project.name}</h1>
           <button
             type="button"
             onClick={() => setFavorite.mutate({ id: project.id, favorite: !project.favorite })}
@@ -141,6 +152,7 @@ function DetailHeader({
           >
             <StarIcon size={20} weight={project.favorite ? "fill" : "regular"} aria-hidden />
           </button>
+          <BookmarkButton type="project" refId={project.id} label={project.name} className="-ml-1" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton aria-label="Project actions">
@@ -148,6 +160,15 @@ function DetailHeader({
               </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-52 rounded-xl">
+              <DropdownMenuItem onSelect={() => dialogs.openProjectSettings(project.id)}>
+                <GearSixIcon aria-hidden /> Project settings
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => dialogs.openDuplicateProject(project)}>
+                <CopyIcon aria-hidden /> Duplicate project
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => dialogs.openMoveToFolder(project)}>
+                <FolderSimpleIcon aria-hidden /> Move to folder
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => copyProjectLink(project.id)}>
                 <LinkSimpleIcon aria-hidden /> Copy project link
               </DropdownMenuItem>
@@ -297,8 +318,9 @@ function MilestoneList({ milestones }: { milestones: Milestone[] }) {
 const taskHead = "px-2 py-2 text-left text-[11px] leading-4 font-normal whitespace-nowrap text-ink-muted";
 const taskCell = "px-2 py-2.5 align-middle";
 
-function TaskTable({ project, tasks }: { project: ProjectDetail; tasks: ProjectTask[] }) {
-  const setDone = useSetTaskDone(project.id);
+function TaskTable({ tasks }: { tasks: ProjectTask[] }) {
+  const setDone = useSetTaskDone();
+  const { openTask } = useAppDialogs();
   return (
     <div className="relative overflow-x-auto px-3 pb-3 scrollbar-thin">
       <table className="w-full min-w-[540px] border-collapse">
@@ -331,7 +353,15 @@ function TaskTable({ project, tasks }: { project: ProjectDetail; tasks: ProjectT
                     className="size-4 rounded-[4px] border-[#D0D5DD] data-[state=checked]:border-brand data-[state=checked]:bg-brand"
                   />
                 </td>
-                <td className={cn(taskCell, "min-w-[170px] text-[13px] leading-5", done ? "text-ink-muted line-through" : "text-ink")}>{t.title}</td>
+                <td className={cn(taskCell, "min-w-[170px] text-[13px] leading-5")}>
+                  <button
+                    type="button"
+                    onClick={() => openTask(t.id)}
+                    className={cn("rounded text-left hover:text-brand focus-visible:outline-2 focus-visible:outline-brand-action", done ? "text-ink-muted line-through" : "text-ink")}
+                  >
+                    {t.title}
+                  </button>
+                </td>
                 <td className={taskCell}>{assignee && <PersonAvatar name={assignee.name} src={assignee.avatar} size="sm" />}</td>
                 <td className={cn(taskCell, "text-[12.5px] whitespace-nowrap text-ink-body")}>{formatDate(t.dueDate)}</td>
                 <td className={taskCell}>
@@ -355,7 +385,7 @@ function TaskTable({ project, tasks }: { project: ProjectDetail; tasks: ProjectT
                       <DropdownMenuItem onSelect={() => setDone.mutate({ taskId: t.id, done: !done })}>
                         <CheckIcon aria-hidden /> {done ? "Mark not done" : "Mark done"}
                       </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => comingSoon("Task details")}>
+                      <DropdownMenuItem onSelect={() => openTask(t.id)}>
                         <ArrowRightIcon aria-hidden /> Open task
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -404,8 +434,16 @@ function MoreAction({ icon: IconCmp, label, onClick, danger }: { icon: Icon; lab
 function SidePanel({ project, onDelete, onClose }: { project: ProjectDetail; onDelete: () => void; onClose: () => void }) {
   const owner = personById(project.ownerId);
   const remove = useRemoveProject(project, onClose);
+  const saveAsTemplate = useSaveAsTemplate();
+  const router = useRouter();
+  const dialogs = useAppDialogs();
+  const { data: folders } = useFolders();
+  const { data: allNotes } = useNotes();
+  const notes = (allNotes ?? []).filter((n) => n.projectId === project.id);
+  const folder = folders?.find((f) => f.id === project.folderId);
   const team = people(project.memberIds);
-  const budgetPct = Math.round((project.budget.spent / project.budget.total) * 100);
+  const budgetPct = project.budget.total ? Math.round((project.budget.spent / project.budget.total) * 100) : 0;
+  const hasAddress = (href: string) => /^https?:\/\//.test(href);
   return (
     <Card label="Project details" className="p-5">
       <PanelSection title="Project owner">
@@ -424,7 +462,7 @@ function SidePanel({ project, onDelete, onClose }: { project: ProjectDetail; onD
         title="Team"
         count={team.length + project.extraMembers}
         action={
-          <button type="button" onClick={() => comingSoon("Managing the team")} className="rounded text-[12px] font-medium text-brand hover:text-brand-press focus-visible:outline-2 focus-visible:outline-brand-action">
+          <button type="button" onClick={() => dialogs.openProjectSettings(project.id)} className="rounded text-[12px] font-medium text-brand hover:text-brand-press focus-visible:outline-2 focus-visible:outline-brand-action">
             Manage
           </button>
         }
@@ -453,18 +491,54 @@ function SidePanel({ project, onDelete, onClose }: { project: ProjectDetail; onD
         </p>
       </PanelSection>
 
+      <PanelSection
+        title="Folder"
+        action={
+          <button type="button" onClick={() => dialogs.openMoveToFolder(project)} className="rounded text-[12px] font-medium text-brand hover:text-brand-press focus-visible:outline-2 focus-visible:outline-brand-action">
+            Move
+          </button>
+        }
+      >
+        <p className="flex items-center gap-2.5 text-[13px] leading-5 text-ink">
+          <FolderSimpleIcon size={16} aria-hidden className="text-ink-muted" />
+          {folder ? (
+            <Link href={`/projects?folder=${folder.id}`} className="truncate rounded hover:text-brand">
+              {folder.name}
+            </Link>
+          ) : (
+            <span className="text-ink-muted">No folder</span>
+          )}
+        </p>
+      </PanelSection>
+
       <PanelSection title="Links">
         <ul>
           {project.links.map((l) => (
-            <li key={l.id}>
-              <button type="button" onClick={() => comingSoon(l.label)} className={cn(panelLink, "text-brand hover:text-brand-press")}>
-                <FileTextIcon size={16} aria-hidden className="shrink-0" />
-                {l.label}
-              </button>
+            <li key={l.id} className="group/link flex items-center gap-1">
+              {l.href.startsWith("/") ? (
+                <Link href={l.href} className={cn(panelLink, "min-w-0 text-brand hover:text-brand-press")}>
+                  <FileTextIcon size={16} aria-hidden className="shrink-0" />
+                  <span className="truncate">{l.label}</span>
+                </Link>
+              ) : hasAddress(l.href) ? (
+                <a href={l.href} target="_blank" rel="noopener noreferrer" className={cn(panelLink, "min-w-0 text-brand hover:text-brand-press")}>
+                  <FileTextIcon size={16} aria-hidden className="shrink-0" />
+                  <span className="truncate">{l.label}</span>
+                </a>
+              ) : (
+                <button type="button" onClick={() => dialogs.openLink(project.id, l)} className={cn(panelLink, "min-w-0 text-ink-muted hover:text-brand")} title="No address yet — add one">
+                  <FileTextIcon size={16} aria-hidden className="shrink-0" />
+                  <span className="truncate">{l.label}</span>
+                  <span className="sr-only">(no address yet)</span>
+                </button>
+              )}
+              <IconButton aria-label={`Edit link ${l.label}`} onClick={() => dialogs.openLink(project.id, l)} className="size-7 shrink-0">
+                <PencilSimpleIcon size={13} aria-hidden />
+              </IconButton>
             </li>
           ))}
           <li>
-            <button type="button" onClick={() => comingSoon("Adding links")} className={cn(panelLink, "text-brand hover:text-brand-press")}>
+            <button type="button" onClick={() => dialogs.openLink(project.id, null)} className={cn(panelLink, "text-brand hover:text-brand-press")}>
               <PlusIcon size={16} aria-hidden className="shrink-0" />
               Add link
             </button>
@@ -472,13 +546,58 @@ function SidePanel({ project, onDelete, onClose }: { project: ProjectDetail; onD
         </ul>
       </PanelSection>
 
+      <PanelSection
+        title="Notes"
+        count={notes.length}
+        action={
+          <Link href={`/notes?note=new&project=${encodeURIComponent(project.id)}`} className="rounded text-[12px] font-medium text-brand hover:text-brand-press focus-visible:outline-2 focus-visible:outline-brand-action">
+            Add
+          </Link>
+        }
+      >
+        {notes.length ? (
+          <ul>
+            {notes.slice(0, 3).map((n) => (
+              <li key={n.id}>
+                <Link href={`/notes?note=${n.id}`} className={cn(panelLink, "text-ink-body hover:text-brand")}>
+                  <NoteIcon size={16} aria-hidden className="shrink-0 text-ink-muted" />
+                  <span className="truncate">{n.title}</span>
+                </Link>
+              </li>
+            ))}
+            {notes.length > 3 && (
+              <li>
+                <Link href={`/notes?project=${encodeURIComponent(project.id)}`} className="text-[12px] font-medium text-brand hover:text-brand-press">
+                  All {notes.length} notes
+                </Link>
+              </li>
+            )}
+          </ul>
+        ) : (
+          <p className="text-[12.5px] text-ink-muted">No notes yet.</p>
+        )}
+      </PanelSection>
+
       <PanelSection title="More" className="pb-0">
         <ul>
-          <MoreAction icon={GearSixIcon} label="Settings" onClick={() => comingSoon("Project settings")} />
+          <MoreAction icon={GearSixIcon} label="Settings" onClick={() => dialogs.openProjectSettings(project.id)} />
           <MoreAction icon={LinkSimpleIcon} label="Copy project link" onClick={() => copyProjectLink(project.id)} />
-          <MoreAction icon={CopyIcon} label="Duplicate project" onClick={() => comingSoon("Duplicating projects")} />
-          <MoreAction icon={FolderSimpleIcon} label="Move to folder" onClick={() => comingSoon("Folders")} />
-          <MoreAction icon={StackIcon} label="Convert to template" onClick={() => comingSoon("Templates")} />
+          <MoreAction icon={CopyIcon} label="Duplicate project" onClick={() => dialogs.openDuplicateProject(project)} />
+          <MoreAction icon={FolderSimpleIcon} label="Move to folder" onClick={() => dialogs.openMoveToFolder(project)} />
+          <MoreAction
+            icon={StackIcon}
+            label="Convert to template"
+            onClick={() =>
+              saveAsTemplate.mutate(
+                { projectId: project.id, name: `${project.name} template` },
+                {
+                  onSuccess: (tpl) =>
+                    toast.success("Template saved", { description: tpl.name, action: { label: "View templates", onClick: () => router.push("/templates") } }),
+                  onError: (err) => toast.error("Couldn't save the template", { description: err.message }),
+                },
+              )
+            }
+          />
           <MoreAction icon={ArchiveIcon} label="Archive project" onClick={() => remove("archived")} />
           <MoreAction icon={TrashIcon} label="Delete project" onClick={onDelete} danger />
         </ul>
@@ -502,28 +621,77 @@ function Overview({ project, onTab }: { project: ProjectDetail; onTab: (t: Detai
       </Card>
       <Card label="Recent tasks">
         <CardHeader title="Recent tasks" action={<ViewAll label="View all tasks" onClick={() => onTab("tasks")} />} />
-        <TaskTable project={project} tasks={project.tasks} />
+        <TaskTable tasks={project.tasks} />
       </Card>
     </div>
   );
 }
 
-const EMPTY_TAB: Partial<Record<DetailTab, { icon: Icon; title: string }>> = {
-  files: { icon: FolderSimpleIcon, title: "Files" },
-  discussion: { icon: TrayIcon, title: "Discussion" },
-  approvals: { icon: CheckIcon, title: "Approvals" },
-  activity: { icon: CompassIcon, title: "Activity" },
-};
+
+const cardAction =
+  "inline-flex h-7 items-center gap-1.5 rounded-md border border-line px-2.5 text-[12px] leading-4 text-ink-body transition-colors hover:border-brand-soft hover:text-brand focus-visible:outline-2 focus-visible:outline-brand-action";
+
+/** All tasks, with "Add task" (the shared New task dialog, preset to this project). */
+function ProjectTasks({ project }: { project: ProjectDetail }) {
+  const { openCreateTask } = useCreate();
+  return (
+    <Card label="Tasks">
+      <CardHeader
+        title={`Tasks (${project.tasks.length})`}
+        action={
+          <button type="button" onClick={() => openCreateTask({ projectId: project.id })} className={cardAction}>
+            <PlusIcon size={13} aria-hidden />
+            Add task
+          </button>
+        }
+      />
+      {project.tasks.length ? (
+        <TaskTable tasks={project.tasks} />
+      ) : (
+        <EmptyState icon={CheckIcon} title="No tasks yet" hint="Add the first task to start tracking work." className="py-10" />
+      )}
+    </Card>
+  );
+}
+
+/** Approval requests raised for this project, decided here or on Workflows → Approvals. */
+function ProjectApprovals({ project }: { project: ProjectDetail }) {
+  const { data } = useReportData();
+  const { openRequestApproval } = useCreate();
+  const approvals = (data?.approvals ?? []).filter((a) => a.projectId === project.id);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <h2 className="text-[15px] leading-6 font-semibold text-ink">Approvals ({approvals.length})</h2>
+        <button type="button" onClick={() => openRequestApproval({ projectId: project.id })} className={cn(cardAction, "ml-auto bg-white")}>
+          <PlusIcon size={13} aria-hidden />
+          Request approval
+        </button>
+      </div>
+      {!data ? (
+        <Skeleton className="h-40 rounded-xl" />
+      ) : approvals.length ? (
+        <ul className="grid gap-3">
+          {approvals.map((a) => (
+            <ApprovalCard key={a.id} approval={a} today={data.today} />
+          ))}
+        </ul>
+      ) : (
+        <Card>
+          <EmptyState icon={CheckIcon} title="No approval requests" hint="Requests for this project — from people or workflows — appear here." className="py-10" />
+        </Card>
+      )}
+    </div>
+  );
+}
 
 function TabBody({ project, tab, onTab }: { project: ProjectDetail; tab: DetailTab; onTab: (t: DetailTab) => void }) {
   if (tab === "overview") return <Overview project={project} onTab={onTab} />;
   if (tab === "tasks") {
-    return (
-      <Card label="Tasks">
-        <CardHeader title={`Tasks (${project.tasks.length})`} />
-        <TaskTable project={project} tasks={project.tasks} />
-      </Card>
-    );
+    return <ProjectTasks project={project} />;
+  }
+  if (tab === "approvals") {
+    return <ProjectApprovals project={project} />;
   }
   if (tab === "milestones") {
     return (
@@ -540,13 +708,26 @@ function TabBody({ project, tab, onTab }: { project: ProjectDetail; tab: DetailT
       </Card>
     );
   }
-  const empty = EMPTY_TAB[tab]!;
+  if (tab === "files") {
+    return (
+      <Card label="Files" className="p-4 @lg:p-5">
+        <FilesPanel projectId={project.id} />
+      </Card>
+    );
+  }
+  if (tab === "discussion") return <ProjectDiscussion projectId={project.id} />;
   return (
-    <Card>
-      <EmptyState icon={empty.icon} title={`${empty.title} will appear here`} hint="This section isn't available in this release yet." />
+    <Card label="Activity">
+      <CardHeader title="Activity" />
+      <div className="px-5 pb-5">
+        <ActivityFeed projectId={project.id} />
+      </div>
     </Card>
   );
 }
+
+const TAB_VALUES = TABS.map((t) => t.value);
+export const isDetailTab = (v: string | null | undefined): v is DetailTab => !!v && (TAB_VALUES as string[]).includes(v);
 
 // ── Panel ────────────────────────────────────────────────────────
 
@@ -559,7 +740,7 @@ function PanelSkeleton() {
         <Skeleton className="mt-3 h-4 w-80 max-w-full" />
         <Skeleton className="mt-5 h-7 w-[420px] max-w-full" />
       </div>
-      <div className="grid grid-cols-1 gap-4 p-4 @lg:p-5 @[620px]:grid-cols-[minmax(0,1fr)_200px]">
+      <div className="grid grid-cols-1 gap-4 p-4 @lg:p-5 @[620px]:grid-cols-[minmax(0,1fr)_200px] @[1100px]:grid-cols-[minmax(0,1fr)_260px]">
         <div className="space-y-4">
           <Skeleton className="h-40 rounded-xl" />
           <Skeleton className="h-72 rounded-xl" />
@@ -571,14 +752,22 @@ function PanelSkeleton() {
 }
 
 /**
- * A project, shown in the panel beside the Projects list (split view on
- * wide screens, a sheet over the list on smaller ones). Its layout follows
- * the panel's own width, not the window's. Remount it per project (key) so
- * the tab resets.
+ * A project's details, shown on the Project Details page. Its layout follows
+ * its own width (container queries), not the window's. Remount it per
+ * project (key) so the tab resets.
  */
-export function ProjectPanel({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+export function ProjectPanel({ projectId, onClose, initialTab, openTaskId }: { projectId: string; onClose: () => void; initialTab?: string; openTaskId?: string }) {
   const { data: project, isError, isPending, refetch } = useProject(projectId);
-  const [tab, setTab] = useState<DetailTab>("overview");
+  const [tab, setTab] = useState<DetailTab>(isDetailTab(initialTab) ? initialTab : "overview");
+  const { openTask } = useAppDialogs();
+  // A bookmarked task (…?task=<id>) opens its details once.
+  const taskOpened = useRef(false);
+  useEffect(() => {
+    if (openTaskId && project && !taskOpened.current) {
+      taskOpened.current = true;
+      openTask(openTaskId);
+    }
+  }, [openTaskId, project, openTask]);
   const [deleting, setDeleting] = useState(false);
   const topRef = useRef<HTMLDivElement>(null);
 
@@ -604,7 +793,7 @@ export function ProjectPanel({ projectId, onClose }: { projectId: string; onClos
     body = (
       <>
         <DetailHeader project={project} tab={tab} onTab={setTab} onDelete={() => setDeleting(true)} onClose={onClose} />
-        <div className="grid grid-cols-1 gap-4 p-4 @lg:p-5 @[620px]:grid-cols-[minmax(0,1fr)_200px]">
+        <div className="grid grid-cols-1 gap-4 p-4 @lg:p-5 @[620px]:grid-cols-[minmax(0,1fr)_200px] @[1100px]:grid-cols-[minmax(0,1fr)_260px]">
           <div className="@container/main min-w-0">
             <TabBody project={project} tab={tab} onTab={changeTab} />
           </div>

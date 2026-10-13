@@ -7,6 +7,7 @@ import {
   CheckIcon,
   DotsThreeIcon,
   FolderOpenIcon,
+  FolderSimpleIcon,
   FunnelSimpleIcon,
   ListBulletsIcon,
   MagnifyingGlassIcon,
@@ -22,22 +23,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AvatarStack } from "@/components/shared/person-avatar";
-import { comingSoon, IconButton, OutlineButton, PrimaryButton, ProgressBar, StatusPill, UnderlineTabs } from "@/components/shared/project-ui";
+import { useCreate } from "@/components/shared/create-dialogs";
+import { IconButton, OutlineButton, PrimaryButton, ProgressBar, StatusPill, UnderlineTabs } from "@/components/shared/project-ui";
 import { EmptyState, ErrorState } from "@/components/shared/state-panels";
 import { useHydrated } from "@/hooks/use-hydrated";
-import { useMediaQuery } from "@/hooks/use-media-query";
 import { usePeople, useProjects } from "@/hooks/use-projects";
+import { useFolders } from "@/hooks/use-workspace";
 import { formatDate } from "@/lib/format";
 import { personById } from "@/lib/mock-data/people";
 import { ACCENT, TAB_LABEL } from "@/lib/project-meta";
+import { projectHref, setProjectsListHref } from "@/lib/routes";
 import { parseProjectQuery, PROJECT_SORTS, PROJECT_TABS, projectQueryString, type ProjectQuery, type ProjectSort } from "@/lib/schemas/project";
 import type { Person, ProjectSummary } from "@/lib/types/project";
 import { cn } from "@/lib/utils";
 import { ProjectRowMenu } from "./project-actions";
-import { ProjectPanel } from "./project-panel";
 import { ProjectThumb } from "./project-thumb";
 
 const SORT_LABEL: Record<ProjectSort, string> = {
@@ -50,7 +51,7 @@ const SORT_LABEL: Record<ProjectSort, string> = {
 
 const members = (p: ProjectSummary) => p.memberIds.map(personById).filter((x): x is Person => !!x);
 
-/** List state lives in the URL (tab, search, owner, sort, layout, and the open project). */
+/** List state lives in the URL (tab, search, owner, sort, layout). */
 function useProjectQuery() {
   const params = useSearchParams();
   const router = useRouter();
@@ -121,6 +122,36 @@ function OwnerFilter({ value, onChange }: { value: string; onChange: (owner: str
   );
 }
 
+/** Folder filter: any, unfiled, or one folder (folders come from Move to folder). */
+function FolderFilter({ value, onChange }: { value: string; onChange: (folder: string) => void }) {
+  const { data: folders } = useFolders();
+  const current = folders?.find((f) => f.id === value);
+  const label = value === "none" ? "No folder" : current?.name;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <OutlineButton icon={FolderSimpleIcon} aria-pressed={!!value} aria-label={label ? `Folder: ${label}` : "Folder"}>
+          <span className="hidden max-w-[120px] truncate sm:inline">{label ?? "Folder"}</span>
+        </OutlineButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-80 w-56 rounded-xl">
+        <DropdownMenuLabel>Folder</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={value || "any"} onValueChange={(v) => onChange(v === "any" ? "" : v)}>
+          <DropdownMenuRadioItem value="any">All folders</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="none">No folder</DropdownMenuRadioItem>
+          <DropdownMenuSeparator />
+          {(folders ?? []).map((f) => (
+            <DropdownMenuRadioItem key={f.id} value={f.id}>
+              <span className="flex-1 truncate">{f.name}</span>
+              <span className="text-[11px] text-ink-muted tabular-nums">{f.count}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function LayoutToggle({ value, onChange }: { value: ProjectQuery["layout"]; onChange: (v: ProjectQuery["layout"]) => void }) {
   const grid = value === "grid";
   return (
@@ -159,36 +190,22 @@ function SortMenu({ value, onChange }: { value: ProjectSort; onChange: (s: Proje
 
 // ── List ─────────────────────────────────────────────────────────────
 
-/** How rows open a project: the panel's URL (for links) and the in-place handler (for clicks). */
-interface RowOpen {
-  selected: string;
-  hrefFor: (id: string) => string;
-  onOpen: (id: string) => void;
-}
+/** Rows and cards open the project's Details page. */
+type OpenProject = (id: string) => void;
 
 const head = "px-3 py-3 text-left text-table-header whitespace-nowrap text-ink-body first:pl-1 last:pr-1";
 const cell = "px-3 py-3.5 align-middle first:pl-1 last:pr-1";
-// Beside the panel the table tightens so every column still fits.
-const headCompact = "px-1.5 py-3 text-left text-[11.5px] leading-4 font-medium whitespace-nowrap text-ink-body first:pl-1 last:pr-0";
-const cellCompact = "px-1.5 py-3 align-middle first:pl-1 last:pr-0";
 
-function NameCell({ project, open, compact }: { project: ProjectSummary; open: RowOpen; compact?: boolean }) {
+function NameCell({ project }: { project: ProjectSummary }) {
   return (
-    <span className={cn("flex min-w-0 items-center", compact ? "gap-3" : "gap-3.5")}>
-      <ProjectThumb thumb={project.thumb} size={compact ? 38 : 42} />
+    <span className="flex min-w-0 items-center gap-3.5">
+      <ProjectThumb thumb={project.thumb} size={42} />
       <span className="min-w-0">
         <Link
-          href={open.hrefFor(project.id)}
-          scroll={false}
-          onClick={(e) => {
-            e.stopPropagation();
-            // Modified clicks keep the browser's open-in-new-tab behaviour.
-            if (e.metaKey || e.ctrlKey || e.shiftKey) return;
-            e.preventDefault();
-            open.onOpen(project.id);
-          }}
-          aria-current={open.selected === project.id ? "true" : undefined}
-          className="relative z-10 block truncate rounded text-[13px] leading-5 font-semibold text-ink hover:text-brand focus-visible:outline-2 focus-visible:outline-brand-action aria-[current=true]:text-brand"
+          href={projectHref(project.id)}
+          // The row/card handles plain clicks too; don't navigate twice.
+          onClick={(e) => e.stopPropagation()}
+          className="relative z-10 block truncate rounded text-[13px] leading-5 font-semibold text-ink hover:text-brand focus-visible:outline-2 focus-visible:outline-brand-action"
         >
           {project.name}
         </Link>
@@ -198,99 +215,68 @@ function NameCell({ project, open, compact }: { project: ProjectSummary; open: R
   );
 }
 
-function ProgressCell({ project, compact }: { project: ProjectSummary; compact?: boolean }) {
+function ProgressCell({ project }: { project: ProjectSummary }) {
   return (
-    <span className={cn("block", compact ? "w-[52px]" : "w-[64px]")}>
+    <span className="block w-[64px]">
       <span className="block text-[12px] leading-4 text-ink-body tabular-nums">{project.progress}%</span>
       <ProgressBar value={project.progress} color={ACCENT[project.accent].bar} className="mt-1.5" label={`${project.name}: ${project.progress}% complete`} />
     </span>
   );
 }
 
-function ProjectTable({
-  items,
-  sort,
-  onSort,
-  open,
-  compact,
-}: {
-  items: ProjectSummary[];
-  sort: ProjectSort;
-  onSort: (s: ProjectSort) => void;
-  open: RowOpen;
-  compact: boolean;
-}) {
-  const h = compact ? headCompact : head;
-  const c = compact ? cellCompact : cell;
-  const date = cn(c, compact ? "text-[11.5px]" : "text-[12.5px]", "whitespace-nowrap text-ink-body");
+function ProjectTable({ items, sort, onSort, onOpen }: { items: ProjectSummary[]; sort: ProjectSort; onSort: (s: ProjectSort) => void; onOpen: OpenProject }) {
+  const date = cn(cell, "text-[12.5px] whitespace-nowrap text-ink-body");
   return (
     <div className="hidden overflow-x-auto scrollbar-thin md:block">
-      <table className={cn("w-full border-collapse", compact ? "min-w-[540px] table-fixed" : "min-w-[820px]")}>
+      <table className="w-full min-w-[820px] border-collapse">
         <thead>
           <tr className="border-b border-line">
-            <th scope="col" className={cn(h, compact ? "w-[30%]" : "w-[34%]")}>
+            <th scope="col" className={cn(head, "w-[34%]")}>
               Name
             </th>
-            <th scope="col" className={cn(h, compact && "w-[14%]")}>
+            <th scope="col" className={head}>
               Status
             </th>
-            <th scope="col" className={cn(h, compact && "w-[10.5%]")}>
+            <th scope="col" className={head}>
               Progress
             </th>
-            <th scope="col" className={cn(h, compact && "w-[13.5%]")}>
+            <th scope="col" className={head}>
               Start Date
             </th>
-            <th scope="col" className={cn(h, compact && "w-[13.5%]")}>
+            <th scope="col" className={head}>
               End Date
             </th>
-            <th scope="col" className={cn(h, compact && "w-[13%]")}>
+            <th scope="col" className={head}>
               Owner
             </th>
-            <th scope="col" className={cn(h, compact ? "w-9 text-right" : "w-10 text-right")}>
+            <th scope="col" className={cn(head, "w-10 text-right")}>
               <span className="sr-only">Actions</span>
               <SortMenu value={sort} onChange={onSort} />
             </th>
           </tr>
         </thead>
         <tbody>
-          {items.map((p) => {
-            const selected = open.selected === p.id;
-            return (
-              <tr
-                key={p.id}
-                onClick={() => open.onOpen(p.id)}
-                aria-selected={selected}
-                className={cn(
-                  "cursor-pointer border-b border-line-soft transition-colors",
-                  selected ? "bg-brand-tint/70 shadow-[inset_3px_0_0_var(--brand)]" : "hover:bg-brand-surface",
-                )}
-              >
-                <td className={cn(c, "max-w-0")}>
-                  <NameCell project={p} open={open} compact={compact} />
-                </td>
-                <td className={c}>
-                  <StatusPill status={p.status} className={compact ? "gap-1 px-2 text-[11.5px]" : undefined} />
-                </td>
-                <td className={c}>
-                  <ProgressCell project={p} compact={compact} />
-                </td>
-                <td className={date}>{formatDate(p.startDate)}</td>
-                <td className={date}>{formatDate(p.endDate)}</td>
-                <td className={c}>
-                  {/* Beside the panel: two faces, the rest in the "+N" chip. */}
-                  <AvatarStack
-                    people={compact ? members(p).slice(0, 2) : members(p)}
-                    extra={p.extraMembers + (compact ? Math.max(0, members(p).length - 2) : 0)}
-                    size={compact ? "xs" : "sm"}
-                    className={compact ? "[&>*]:size-[22px]" : undefined}
-                  />
-                </td>
-                <td className={cn(c, "text-right")}>
-                  <ProjectRowMenu project={p} />
-                </td>
-              </tr>
-            );
-          })}
+          {items.map((p) => (
+            <tr key={p.id} onClick={() => onOpen(p.id)} className="cursor-pointer border-b border-line-soft transition-colors hover:bg-brand-surface">
+              <td className={cn(cell, "max-w-0")}>
+                <NameCell project={p} />
+              </td>
+              <td className={cell}>
+                <StatusPill status={p.status} />
+              </td>
+              <td className={cell}>
+                <ProgressCell project={p} />
+              </td>
+              <td className={date}>{formatDate(p.startDate)}</td>
+              <td className={date}>{formatDate(p.endDate)}</td>
+              <td className={cell}>
+                <AvatarStack people={members(p)} extra={p.extraMembers} size="sm" />
+              </td>
+              <td className={cn(cell, "text-right")}>
+                <ProjectRowMenu project={p} />
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -298,19 +284,13 @@ function ProjectTable({
 }
 
 /** Phones: one card per project instead of the table. Also the grid layout. */
-function ProjectCards({ items, grid, open }: { items: ProjectSummary[]; grid: boolean; open: RowOpen }) {
+function ProjectCards({ items, grid, onOpen }: { items: ProjectSummary[]; grid: boolean; onOpen: OpenProject }) {
   return (
     <ul className={cn("grid gap-3 pt-4", grid ? "@xl:grid-cols-2 @5xl:grid-cols-3" : "md:hidden")}>
       {items.map((p) => (
-        <li
-          key={p.id}
-          className={cn(
-            "relative rounded-xl border bg-card p-4 shadow-card transition-colors",
-            open.selected === p.id ? "border-brand-soft bg-brand-surface ring-1 ring-brand-soft" : "border-line hover:border-brand-soft",
-          )}
-        >
+        <li key={p.id} className="relative rounded-xl border border-line bg-card p-4 shadow-card transition-colors hover:border-brand-soft">
           <div className="flex items-start gap-3">
-            <NameCell project={p} open={open} />
+            <NameCell project={p} />
             <div className="relative z-10 ml-auto">
               <ProjectRowMenu project={p} />
             </div>
@@ -327,7 +307,7 @@ function ProjectCards({ items, grid, open }: { items: ProjectSummary[]; grid: bo
             <AvatarStack people={members(p)} extra={p.extraMembers} size="sm" />
           </div>
           {/* Whole card opens the project; the name link and menu stay on top for keyboard users. */}
-          <button type="button" onClick={() => open.onOpen(p.id)} className="absolute inset-0 rounded-xl" aria-hidden tabIndex={-1} />
+          <button type="button" onClick={() => onOpen(p.id)} className="absolute inset-0 rounded-xl" aria-hidden tabIndex={-1} />
         </li>
       ))}
     </ul>
@@ -357,13 +337,14 @@ function ListSkeleton() {
 const listPane = "@container min-w-0 px-4 py-5 sm:px-6 lg:py-7";
 
 function PageTitle() {
+  const { openCreateProject } = useCreate();
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 className="text-[26px] leading-9 font-bold tracking-[-0.01em] text-ink sm:text-[28px]">Projects</h1>
         <p className="mt-1 text-[14px] leading-5 text-ink-muted">Plan, track and deliver all your projects in one place.</p>
       </div>
-      <PrimaryButton onClick={() => comingSoon("Creating projects")} className="mt-1">
+      <PrimaryButton onClick={() => openCreateProject()} className="mt-1">
         <PlusIcon size={16} weight="bold" aria-hidden className="sm:hidden" />
         New Project
       </PrimaryButton>
@@ -380,74 +361,32 @@ export function ProjectsViewFallback() {
   );
 }
 
-const WIDE = "(min-width: 1280px)";
-
-/**
- * The project open beside the list. Wide screens (xl+): a split view — the
- * list stays on the left and the panel fills the right, sticky under the
- * header. Smaller screens: a sheet sliding in from the right over the list.
- */
-function ProjectSidePanel({ projectId, wide, onClose }: { projectId: string; wide: boolean; onClose: () => void }) {
-  useEffect(() => {
-    if (!wide) return; // the sheet handles Escape itself
-    const onKey = (e: KeyboardEvent) => {
-      // Leave Escape to an open menu or dialog first.
-      if (e.key === "Escape" && !document.querySelector("[role=dialog],[role=menu]")) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [wide, onClose]);
-
-  if (wide) {
-    return (
-      <aside
-        aria-labelledby="project-panel-title"
-        className="sticky top-[var(--header-h)] h-[calc(100dvh-var(--header-h))] min-w-0 overflow-y-auto border-l border-line bg-[#F7F7FA] scrollbar-thin"
-      >
-        <ProjectPanel key={projectId} projectId={projectId} onClose={onClose} />
-      </aside>
-    );
-  }
-  return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent
-        side="right"
-        showCloseButton={false}
-        aria-describedby={undefined}
-        className="w-full gap-0 overflow-y-auto border-l border-line bg-[#F7F7FA] p-0 sm:max-w-[720px] data-[side=right]:w-full data-[side=right]:sm:max-w-[720px]"
-      >
-        <SheetTitle className="sr-only">Project details</SheetTitle>
-        <ProjectPanel key={projectId} projectId={projectId} onClose={onClose} />
-      </SheetContent>
-    </Sheet>
-  );
-}
-
 export function ProjectsView() {
   const [query, update] = useProjectQuery();
   const { data, isError, refetch } = useProjects(query);
   const hydrated = useHydrated();
-  const wide = useMediaQuery(WIDE);
+  const router = useRouter();
+  const legacyProject = useSearchParams().get("project");
   const onSearch = useCallback((q: string) => update({ q }), [update]);
-  const closePanel = useCallback(() => update({ project: "" }), [update]);
-  const filtered = !!query.q || !!query.owner;
-  const panelOpen = hydrated && !!query.project;
-  const split = panelOpen && wide;
+  const onOpen = useCallback((id: string) => router.push(projectHref(id)), [router]);
+  const filtered = !!query.q || !!query.owner || !!query.folder;
 
-  const open: RowOpen = {
-    selected: query.project,
-    hrefFor: (id) => `/projects${projectQueryString({ ...query, project: id })}`,
-    onOpen: (id) => update({ project: id }),
-  };
+  // "Back to Projects" from a project returns to this exact list state.
+  useEffect(() => setProjectsListHref(`/projects${projectQueryString(query)}`), [query]);
+  // Old `/projects?project=…` links (from the side-panel days) open the Details page.
+  useEffect(() => {
+    if (legacyProject) router.replace(projectHref(legacyProject));
+  }, [legacyProject, router]);
 
   return (
-    <div className={cn("flex-1", split && "grid grid-cols-2 items-start")}>
-      <div className={cn(listPane, split ? "lg:px-6" : "mx-auto w-full max-w-[1600px] lg:px-9")}>
+    <div className="flex-1">
+      <div className={cn(listPane, "mx-auto w-full max-w-[1600px] lg:px-9")}>
         <PageTitle />
 
         <div className="mt-5 flex items-center justify-end gap-2 lg:mt-1">
           <ProjectSearch value={query.q} onChange={onSearch} />
           <OwnerFilter value={query.owner} onChange={(owner) => update({ owner })} />
+          <FolderFilter value={query.folder} onChange={(folder) => update({ folder })} />
           <LayoutToggle value={query.layout} onChange={(layout) => update({ layout })} />
           <div className="md:hidden">
             <SortMenu value={query.sort} onChange={(sort) => update({ sort })} />
@@ -455,7 +394,8 @@ export function ProjectsView() {
         </div>
         <UnderlineTabs
           label="Project status"
-          className={cn("mt-3", split && "sm:gap-5")}
+          className="mt-3"
+          dot={false}
           value={query.tab}
           onChange={(tab) => update({ tab })}
           tabs={PROJECT_TABS.map((t) => ({ value: t, label: TAB_LABEL[t], count: hydrated ? data?.counts[t] : undefined }))}
@@ -472,23 +412,21 @@ export function ProjectsView() {
             hint={filtered ? "Try a different search or clear the filter." : "Projects appear here as their status changes."}
             action={
               filtered ? (
-                <OutlineButton icon={CheckIcon} onClick={() => update({ q: "", owner: "" })}>
+                <OutlineButton icon={CheckIcon} onClick={() => update({ q: "", owner: "", folder: "" })}>
                   Clear search and filter
                 </OutlineButton>
               ) : undefined
             }
           />
         ) : query.layout === "grid" ? (
-          <ProjectCards items={data.items} grid open={open} />
+          <ProjectCards items={data.items} grid onOpen={onOpen} />
         ) : (
           <>
-            <ProjectTable items={data.items} sort={query.sort} onSort={(sort) => update({ sort })} open={open} compact={split} />
-            <ProjectCards items={data.items} grid={false} open={open} />
+            <ProjectTable items={data.items} sort={query.sort} onSort={(sort) => update({ sort })} onOpen={onOpen} />
+            <ProjectCards items={data.items} grid={false} onOpen={onOpen} />
           </>
         )}
       </div>
-
-      {panelOpen && <ProjectSidePanel projectId={query.project} wide={wide} onClose={closePanel} />}
     </div>
   );
 }

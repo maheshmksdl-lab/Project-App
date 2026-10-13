@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BellIcon,
@@ -26,13 +27,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PersonAvatar } from "@/components/shared/person-avatar";
-import { comingSoon } from "@/components/shared/project-ui";
-import { CURRENT_USER_ID, personById } from "@/lib/mock-data/people";
+import { useAppDialogs } from "@/components/shared/app-dialogs";
+import { useCreate } from "@/components/shared/create-dialogs";
+import { useMe } from "@/hooks/use-me";
+import { useStoredState } from "@/hooks/use-stored-state";
 import { cn } from "@/lib/utils";
 import { LogoMark } from "./app-logo";
 import { useShell } from "./shell-context";
-
-const me = personById(CURRENT_USER_ID)!;
+import { useWhatsNew } from "./whats-new";
 
 const SEARCH_PLACEHOLDER = "Search projects, tasks, approvals, files, or ask AI...";
 
@@ -93,11 +95,12 @@ function SearchField({ autoFocus, onDone, className }: { autoFocus?: boolean; on
 
 /** Violet split button: "Create" plus a menu of what can be created. */
 function CreateMenu() {
+  const create = useCreate();
   const items = [
-    { label: "New project", icon: FolderSimplePlusIcon },
-    { label: "New task", icon: CheckSquareIcon },
-    { label: "New workflow", icon: TreeStructureIcon },
-    { label: "New approval", icon: SealCheckIcon },
+    { label: "New project", icon: FolderSimplePlusIcon, onSelect: () => create.openCreateProject() },
+    { label: "New task", icon: CheckSquareIcon, onSelect: () => create.openCreateTask() },
+    { label: "New workflow", icon: TreeStructureIcon, onSelect: () => create.openCreateWorkflow() },
+    { label: "New approval", icon: SealCheckIcon, onSelect: () => create.openRequestApproval() },
   ];
   return (
     <DropdownMenu>
@@ -113,8 +116,8 @@ function CreateMenu() {
         <span className="sr-only sm:hidden">Create</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52 rounded-xl">
-        {items.map(({ label, icon: IconCmp }) => (
-          <DropdownMenuItem key={label} onSelect={() => comingSoon(label)}>
+        {items.map(({ label, icon: IconCmp, onSelect }) => (
+          <DropdownMenuItem key={label} onSelect={onSelect}>
             <IconCmp aria-hidden /> {label}
           </DropdownMenuItem>
         ))}
@@ -123,29 +126,52 @@ function CreateMenu() {
   );
 }
 
+/** Sample notifications; each opens the record it's about. */
 const NOTIFICATIONS = [
-  { id: "n1", text: "Mike Johnson approved Budget Review", at: "10m ago" },
-  { id: "n2", text: "Warehouse Expansion is blocked by a vendor delay", at: "1h ago" },
-  { id: "n3", text: "Anna Singh commented on ERP Deployment", at: "3h ago" },
+  { id: "n1", text: "Mike Johnson approved Budget Review", at: "10m ago", href: "/workflows/wf-budget-review" },
+  { id: "n2", text: "Warehouse Expansion is blocked by a vendor delay", at: "1h ago", href: "/projects/warehouse-expansion" },
+  { id: "n3", text: "Anna Singh commented on ERP Deployment", at: "3h ago", href: "/projects/erp-implementation?tab=discussion" },
 ];
 
+const NONE_SEEN: string[] = [];
+
 function NotificationsMenu() {
-  const [unread, setUnread] = useState(true);
+  // Which notifications have been opened, kept in this browser.
+  const [seen, setSeen] = useStoredState<string[]>("evoq-projects:notifications-seen", NONE_SEEN);
+  const unread = NOTIFICATIONS.filter((n) => !seen.includes(n.id)).length;
   return (
-    <DropdownMenu onOpenChange={(open) => open && setUnread(false)}>
-      <DropdownMenuTrigger aria-label={unread ? "Notifications (unread)" : "Notifications"} className={toolClass}>
+    <DropdownMenu>
+      <DropdownMenuTrigger aria-label={unread ? `Notifications (${unread} unread)` : "Notifications"} className={toolClass}>
         <BellIcon size={20} aria-hidden />
-        {unread && <span className="absolute top-1.5 right-2 size-2 rounded-full bg-[#EF4444] ring-2 ring-white" aria-hidden />}
+        {unread > 0 && <span className="absolute top-1.5 right-2 size-2 rounded-full bg-[#EF4444] ring-2 ring-white" aria-hidden />}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 rounded-xl p-0">
-        <DropdownMenuLabel className="px-4 pt-3 pb-2 text-[14px] font-semibold text-ink">Notifications</DropdownMenuLabel>
+        <div className="flex items-center justify-between px-4 pt-3 pb-2">
+          <DropdownMenuLabel className="p-0 text-[14px] font-semibold text-ink">Notifications</DropdownMenuLabel>
+          <button
+            type="button"
+            disabled={!unread}
+            onClick={() => setSeen(NOTIFICATIONS.map((n) => n.id))}
+            className="rounded text-[12px] font-medium text-brand hover:text-brand-press disabled:text-ink-faint focus-visible:outline-2 focus-visible:outline-brand-action"
+          >
+            Mark all as read
+          </button>
+        </div>
         <DropdownMenuSeparator className="my-0" />
-        {NOTIFICATIONS.map((n) => (
-          <DropdownMenuItem key={n.id} className="flex-col items-start gap-0.5 rounded-none px-4 py-2.5" onSelect={() => comingSoon("Notifications")}>
-            <span className="text-[13px] leading-5 text-ink">{n.text}</span>
-            <span className="text-[12px] leading-4 text-ink-muted">{n.at}</span>
-          </DropdownMenuItem>
-        ))}
+        {NOTIFICATIONS.map((n) => {
+          const isNew = !seen.includes(n.id);
+          return (
+            <DropdownMenuItem key={n.id} asChild className="rounded-none px-4 py-2.5">
+              <Link href={n.href} onClick={() => isNew && setSeen([...seen, n.id])} className="flex items-start gap-2.5">
+                <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", isNew ? "bg-brand" : "bg-transparent")} aria-label={isNew ? "Unread" : undefined} />
+                <span className="flex flex-col gap-0.5">
+                  <span className={cn("text-[13px] leading-5 text-ink", isNew && "font-medium")}>{n.text}</span>
+                  <span className="text-[12px] leading-4 text-ink-muted">{n.at}</span>
+                </span>
+              </Link>
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -163,6 +189,9 @@ function HeaderTip({ label, children }: { label: string; children: ReactElement 
 export function AppHeader() {
   const { setDrawerOpen } = useShell();
   const [mobileSearch, setMobileSearch] = useState(false);
+  const me = useMe();
+  const dialogs = useAppDialogs();
+  const { unread: newUpdates } = useWhatsNew();
 
   return (
     <header className="fixed top-0 right-0 left-0 z-30 flex h-[60px] items-center gap-2 border-b border-line bg-white/95 px-3 backdrop-blur sm:gap-3 sm:px-5 lg:left-[var(--sidebar-w)] lg:h-[var(--header-h)] lg:border-line-soft lg:px-9">
@@ -188,18 +217,26 @@ export function AppHeader() {
         <div className="ml-1 flex items-center gap-1 sm:ml-3 sm:gap-2 lg:gap-3">
           <NotificationsMenu />
           <HeaderTip label="Ask AI">
-            <button type="button" onClick={() => comingSoon("Ask AI")} aria-label="Ask AI" className={cn(toolClass, "bg-brand-tint text-brand hover:bg-brand-10 hover:text-brand")}>
+            <button type="button" onClick={dialogs.openInsights} aria-label="Ask AI" className={cn(toolClass, "bg-brand-tint text-brand hover:bg-brand-10 hover:text-brand")}>
               <SparkleIcon size={20} weight="duotone" aria-hidden />
             </button>
           </HeaderTip>
           <DropdownMenu>
-            <DropdownMenuTrigger aria-label="More" className={cn(toolClass, "hidden sm:inline-flex")}>
+            <DropdownMenuTrigger aria-label={newUpdates ? `More (${newUpdates} new updates)` : "More"} className={cn(toolClass, "hidden sm:inline-flex")}>
               <DotsThreeIcon size={22} weight="bold" aria-hidden />
+              {newUpdates > 0 && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-brand ring-2 ring-white" aria-hidden />}
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48 rounded-xl">
-              <DropdownMenuItem onSelect={() => comingSoon("Keyboard shortcuts")}>Keyboard shortcuts</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => comingSoon("What's new")}>What&apos;s new</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => comingSoon("Help center")}>Help center</DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-52 rounded-xl">
+              <DropdownMenuItem asChild>
+                <Link href="/help#shortcuts">Keyboard shortcuts</Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={dialogs.openWhatsNew}>
+                What&apos;s new
+                {newUpdates > 0 && <span className="ml-auto rounded-full bg-brand px-1.5 text-[11px] leading-[18px] font-semibold text-white tabular-nums">{newUpdates}</span>}
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/help">Help center</Link>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -216,9 +253,18 @@ export function AppHeader() {
                 <span className="block text-[12px] font-normal text-ink-muted">{me.role}</span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => comingSoon("Your profile")}>Profile</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => comingSoon("Settings")}>Settings</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => comingSoon("Signing out")}>Log out</DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/profile">Profile</Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/settings">Settings</Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={dialogs.openWhatsNew} className="sm:hidden">
+                What&apos;s new
+                {newUpdates > 0 && <span className="ml-auto rounded-full bg-brand px-1.5 text-[11px] leading-[18px] font-semibold text-white tabular-nums">{newUpdates}</span>}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={dialogs.openLogout}>Log out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

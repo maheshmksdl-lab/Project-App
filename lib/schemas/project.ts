@@ -17,13 +17,13 @@ export const projectQuerySchema = z.object({
   sort: z.enum(PROJECT_SORTS).catch("default"),
   layout: z.enum(PROJECT_LAYOUTS).catch("list"),
   owner: z.string().catch(""),
-  /** The project open in the side panel. */
-  project: z.string().max(100).catch(""),
+  /** Folder filter: "" any, "none" unfiled, or a folder id. */
+  folder: z.string().max(60).catch(""),
 });
 
 export type ProjectQuery = z.infer<typeof projectQuerySchema>;
 
-export const DEFAULT_PROJECT_QUERY: ProjectQuery = { tab: "all", q: "", sort: "default", layout: "list", owner: "", project: "" };
+export const DEFAULT_PROJECT_QUERY: ProjectQuery = { tab: "all", q: "", sort: "default", layout: "list", owner: "", folder: "" };
 
 export function parseProjectQuery(params: URLSearchParams): ProjectQuery {
   return projectQuerySchema.parse({
@@ -32,7 +32,7 @@ export function parseProjectQuery(params: URLSearchParams): ProjectQuery {
     sort: params.get("sort") ?? undefined,
     layout: params.get("layout") ?? undefined,
     owner: params.get("owner") ?? undefined,
-    project: params.get("project") ?? undefined,
+    folder: params.get("folder") ?? undefined,
   });
 }
 

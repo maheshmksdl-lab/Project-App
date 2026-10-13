@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "Projects" };
 
 export default function ProjectsPage() {
   return (
-    // The list and the open project read their state from the URL, so they render on the client inside Suspense.
+    // The list reads its state from the URL, so it renders on the client inside Suspense.
     <Suspense fallback={<ProjectsViewFallback />}>
       <ProjectsView />
     </Suspense>

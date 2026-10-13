@@ -35,6 +35,8 @@ export interface ProjectSummary {
   accent: Accent;
   thumb: ProjectThumb;
   favorite: boolean;
+  /** Folder the project is filed in (Move to folder); none when unset. */
+  folderId?: string | null;
 }
 
 export type MilestoneState = "completed" | "in_progress" | "not_started";
@@ -127,7 +129,7 @@ export interface WorkspaceTile {
   meta: string;
 }
 
-export type ActivityKind = "approved" | "uploaded" | "completed" | "commented";
+export type ActivityKind = "approved" | "uploaded" | "completed" | "commented" | "updated";
 
 export interface ActivityItem {
   id: string;
